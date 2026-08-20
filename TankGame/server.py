@@ -12,7 +12,7 @@ PORT = 5555
 WIDTH, HEIGHT = 1470, 956
 TANK_SIZE = 42
 MAX_HEALTH = 12
-DRONE_MAX_HEALTH = 4
+DRONE_MAX_HEALTH = 2
 DRONE_SPLASH_RADIUS = 150
 EXPLOSION_DURATION = 0.18
 TANK_SPEED = 185.0
@@ -31,7 +31,7 @@ WALLS = [(210, 100, 300, 24), (760, 90, 24, 230), (1080, 110, 280, 24),
 		 (120, 300, 24, 260), (360, 300, 250, 24), (700, 390, 300, 24),
 		 (1160, 330, 24, 260), (180, 650, 280, 24), (540, 610, 24, 210),
 		 (790, 700, 300, 24), (1180, 750, 24, 150), (300, 850, 280, 24)]
-MACHINE_BOUNCE_CHANCE = 0.25
+MACHINE_BOUNCE_CHANCE = 1.0
 ROCKET_CONVERGENCE_DISTANCES = (240.0, 150.0, 75.0)
 ROCKET_LAUNCH_INTERVAL = 0.12
 ROCKET_TURN_SPEED = 14.0
@@ -223,6 +223,8 @@ class TankServer:
 	def update_bullets(self, delta):
 		survivors = []
 		for bullet in self.bullets:
+			previous_x = bullet["x"]
+			previous_y = bullet["y"]
 			if bullet["weapon"] == "drone":
 				owner = self.players.get(bullet["owner"])
 				if not owner or not owner.get("drone_active"):
@@ -253,10 +255,26 @@ class TankServer:
 						self.explode_drone(bullet)
 						continue
 					if bullet["weapon"] == "machine" and random.random() < MACHINE_BOUNCE_CHANCE:
-						wall_is_horizontal = wall_hit[2] >= wall_hit[3]
-						bullet["angle"] = -bullet["angle"] if wall_is_horizontal else math.pi - bullet["angle"]
-						bullet["x"] -= math.cos(bullet["angle"]) * bullet["speed"] * delta
-						bullet["y"] -= math.sin(bullet["angle"]) * bullet["speed"] * delta
+						left = wall_hit[0] - bullet["radius"]
+						right = wall_hit[0] + wall_hit[2] + bullet["radius"]
+						top = wall_hit[1] - bullet["radius"]
+						bottom = wall_hit[1] + wall_hit[3] + bullet["radius"]
+						hit_vertical = previous_x < left or previous_x > right
+						hit_horizontal = previous_y < top or previous_y > bottom
+						velocity_x = math.cos(bullet["angle"])
+						velocity_y = math.sin(bullet["angle"])
+						if hit_vertical:
+							velocity_x *= -1
+						if hit_horizontal:
+							velocity_y *= -1
+						if not hit_vertical and not hit_horizontal:
+							if wall_hit[2] >= wall_hit[3]:
+								velocity_y *= -1
+							else:
+								velocity_x *= -1
+						bullet["angle"] = math.atan2(velocity_y, velocity_x)
+						bullet["x"] = previous_x + velocity_x * bullet["speed"] * delta
+						bullet["y"] = previous_y + velocity_y * bullet["speed"] * delta
 						survivors.append(bullet)
 					continue
 			hit = False
