@@ -74,7 +74,8 @@ class TankServer:
 					player_id = str(len(self.players) + 1)
 					x, y = SPAWNS[len(self.players)]
 					self.players[player_id] = {"x": x, "y": y, "angle": 0.0 if player_id == "1" else math.pi,
-						"health": MAX_HEALTH, "connected": True, "weapon": "cannon", "drone_active": False}
+						"health": MAX_HEALTH, "max_health": MAX_HEALTH, "connected": True,
+						"weapon": "cannon", "drone_active": False}
 					self.clients[player_id] = conn
 				print(f"Player {player_id} joined from {address[0]}")
 				conn.sendall((json.dumps({"type": "welcome", "id": player_id}) + "\n").encode())
@@ -374,7 +375,7 @@ class TankServer:
 			x, y = SPAWNS[index]
 			player = self.players[player_id]
 			player.update({"x": x, "y": y, "angle": 0.0 if index == 0 else math.pi,
-				"health": MAX_HEALTH, "weapon": "cannon", "input": {}, "next_shot": 0,
+				"health": MAX_HEALTH, "max_health": MAX_HEALTH, "weapon": "cannon", "input": {}, "next_shot": 0,
 				"drone_active": False, "rocket_queue": [], "rocket_next_launch": 0})
 
 	def snapshot(self, now):

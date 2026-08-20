@@ -94,7 +94,7 @@ def draw_tank(screen, player_id, player, is_local):
 	bar = pygame.Rect(rect.x, rect.y - 10, TANK_SIZE, 5)
 	pygame.draw.rect(screen, (55, 60, 70), bar)
 	pygame.draw.rect(screen, (92, 226, 140),
-					(bar.x, bar.y, bar.width * player["health"] / MAX_HEALTH, bar.height))
+					(bar.x, bar.y, bar.width * player["health"] / player.get("max_health", MAX_HEALTH), bar.height))
 	if player.get("health", MAX_HEALTH) <= 0:
 		elapsed = pygame.time.get_ticks() / 1000
 		for smoke_index in range(4):
