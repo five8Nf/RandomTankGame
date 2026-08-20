@@ -32,6 +32,9 @@ WALLS = [(210, 100, 300, 24), (760, 90, 24, 230), (1080, 110, 280, 24),
 		 (1160, 330, 24, 260), (180, 650, 280, 24), (540, 610, 24, 210),
 		 (790, 700, 300, 24), (1180, 750, 24, 150), (300, 850, 280, 24)]
 MACHINE_BOUNCE_CHANCE = 0.25
+ROCKET_CONVERGENCE_DISTANCES = (240.0, 150.0, 75.0)
+ROCKET_LAUNCH_INTERVAL = 0.12
+ROCKET_TURN_SPEED = 5.5
 
 
 def intersects_wall(x, y):
@@ -137,20 +140,10 @@ class TankServer:
 					player["drone_active"] = True
 					return
 				if player["weapon"] == "rocket_launcher":
-					enemy = next((other for other_id, other in self.players.items()
-						if other_id != player_id), None)
-					target_x = enemy["x"] + TANK_SIZE / 2 if enemy else player["x"] + math.cos(player["angle"]) * 100
-					target_y = enemy["y"] + TANK_SIZE / 2 if enemy else player["y"] + math.sin(player["angle"]) * 100
-					for side in (-1, 1):
-						for longitudinal_offset in (-12, 0, 12):
-							launch_x = player["x"] + TANK_SIZE / 2 + math.cos(player["angle"]) * longitudinal_offset
-							launch_y = player["y"] + TANK_SIZE / 2 + math.sin(player["angle"]) * longitudinal_offset
-							launch_x += -math.sin(player["angle"]) * side * (TANK_SIZE * 0.62)
-							launch_y += math.cos(player["angle"]) * side * (TANK_SIZE * 0.62)
-							rocket_angle = math.atan2(target_y - launch_y, target_x - launch_x)
-							self.bullets.append({"owner": player_id, "x": launch_x, "y": launch_y,
-								"angle": rocket_angle, "speed": weapon["speed"], "damage": weapon["damage"],
-								"radius": weapon["radius"], "weapon": "rocket"})
+					player["rocket_queue"] = [(side, longitudinal_offset, convergence_distance)
+						for side in (-1, 1)
+						for longitudinal_offset, convergence_distance in zip((-12, 0, 12), ROCKET_CONVERGENCE_DISTANCES)]
+					player["rocket_next_launch"] = now
 					return
 				for shot_index in range(weapon["count"]):
 					if player["weapon"] == "machine":
@@ -172,6 +165,7 @@ class TankServer:
 			previous = now
 			with self.lock:
 				self.update_players(delta)
+				self.update_rocket_queues()
 				self.update_bullets(delta)
 				self.update_explosions(delta)
 				payload = (json.dumps(self.snapshot(now)) + "\n").encode()
@@ -202,6 +196,27 @@ class TankServer:
 			if not intersects_wall(player["x"], new_y):
 				player["y"] = new_y
 
+	def update_rocket_queues(self):
+		now = time.monotonic()
+		for player_id, player in self.players.items():
+			queue = player.get("rocket_queue", [])
+			if not queue or now < player.get("rocket_next_launch", 0):
+				continue
+			side, longitudinal_offset, convergence_distance = queue.pop(0)
+			angle = player["angle"]
+			launch_x = player["x"] + TANK_SIZE / 2 + math.cos(angle) * longitudinal_offset
+			launch_y = player["y"] + TANK_SIZE / 2 + math.sin(angle) * longitudinal_offset
+			launch_x += -math.sin(angle) * side * (TANK_SIZE * 0.62)
+			launch_y += math.cos(angle) * side * (TANK_SIZE * 0.62)
+			convergence_x = player["x"] + TANK_SIZE / 2 + math.cos(angle) * convergence_distance
+			convergence_y = player["y"] + TANK_SIZE / 2 + math.sin(angle) * convergence_distance
+			self.bullets.append({"owner": player_id, "x": launch_x, "y": launch_y,
+				"angle": angle + side * math.pi / 2, "speed": WEAPONS["rocket_launcher"]["speed"],
+				"damage": WEAPONS["rocket_launcher"]["damage"], "radius": WEAPONS["rocket_launcher"]["radius"],
+				"weapon": "rocket", "target_x": convergence_x, "target_y": convergence_y,
+				"turning": True})
+			player["rocket_next_launch"] = now + ROCKET_LAUNCH_INTERVAL
+
 	def update_bullets(self, delta):
 		survivors = []
 		for bullet in self.bullets:
@@ -211,6 +226,16 @@ class TankServer:
 					continue
 				message = owner.get("input", {})
 				bullet["angle"] += max(-1, min(1, float(message.get("turn", 0)))) * TURN_SPEED * delta
+			elif bullet["weapon"] == "rocket" and bullet.get("turning"):
+				target_angle = math.atan2(bullet["target_y"] - bullet["y"],
+					bullet["target_x"] - bullet["x"])
+				angle_difference = (target_angle - bullet["angle"] + math.pi) % (2 * math.pi) - math.pi
+				max_turn = ROCKET_TURN_SPEED * delta
+				if abs(angle_difference) <= max_turn:
+					bullet["angle"] = target_angle
+					bullet["turning"] = False
+				else:
+					bullet["angle"] += math.copysign(max_turn, angle_difference)
 			bullet["x"] += math.cos(bullet["angle"]) * bullet["speed"] * delta
 			bullet["y"] += math.sin(bullet["angle"]) * bullet["speed"] * delta
 			if not (0 <= bullet["x"] <= WIDTH and 0 <= bullet["y"] <= HEIGHT):
