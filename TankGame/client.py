@@ -100,15 +100,15 @@ def draw_tank(screen, player_id, player, is_local):
 def draw_explosion(screen, explosion):
 	progress = 1 - explosion["time_left"] / explosion["duration"]
 	center = (round(explosion["x"]), round(explosion["y"]))
-	radius = max(10, round(24 + explosion["radius"] * progress * 0.65))
-	flash_radius = max(10, round(radius * (1 - progress * 0.35)))
+	radius = max(24, round(55 + explosion["radius"] * progress * 1.2))
+	flash_radius = max(18, round(radius * (1 - progress * 0.45)))
 	pygame.draw.circle(screen, (255, 214, 89), center, flash_radius)
 	pygame.draw.circle(screen, (255, 245, 187), center, max(5, round(flash_radius * 0.7)))
 	pygame.draw.circle(screen, (255, 255, 255), center, max(3, round(flash_radius * 0.35)))
-	for ray_direction in range(0, 360, 45):
+	for ray_direction in range(0, 360, 30):
 		radians = math.radians(ray_direction)
 		inner = max(4, round(radius * 0.65))
-		outer = radius + 10
+		outer = radius + 28
 		pygame.draw.line(screen, (255, 236, 151),
 			(center[0] + round(math.cos(radians) * inner), center[1] + round(math.sin(radians) * inner)),
 			(center[0] + round(math.cos(radians) * outer), center[1] + round(math.sin(radians) * outer)), 2)
@@ -127,6 +127,7 @@ def main():
 	pygame.display.set_caption("Tank Duel")
 	clock = pygame.time.Clock()
 	world_surface = pygame.Surface((WIDTH, HEIGHT))
+	flash_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
 	title_font = pygame.font.Font(None, 42)
 	info_font = pygame.font.Font(None, 25)
 	running = True
@@ -177,7 +178,7 @@ def main():
 		for drone_key, drone in known_drones.items():
 			if drone_key not in current_drones:
 				local_explosions.append({"x": drone["x"], "y": drone["y"],
-					"radius": 150, "time_left": 0.18, "duration": 0.18})
+					"radius": 220, "time_left": 0.28, "duration": 0.28})
 		known_drones = current_drones
 		frame_delta = clock.get_time() / 1000
 		for explosion in local_explosions:
@@ -185,7 +186,7 @@ def main():
 		local_explosions = [explosion for explosion in local_explosions
 			if explosion["time_left"] > 0]
 		all_explosions = state["explosions"] + local_explosions
-		shake_strength = max((min(12, round(12 * explosion["time_left"] / explosion["duration"]))
+		shake_strength = max((min(30, round(30 * explosion["time_left"] / explosion["duration"]))
 			for explosion in all_explosions), default=0)
 		shake_offset = (random.randint(-shake_strength, shake_strength),
 			random.randint(-shake_strength, shake_strength))
@@ -257,6 +258,11 @@ def main():
 		for explosion in local_explosions:
 			draw_explosion(world_surface, explosion)
 		screen.blit(world_surface, shake_offset)
+		flash_strength = max((min(210, round(210 * (explosion["time_left"] / explosion["duration"]) ** 2))
+			for explosion in all_explosions), default=0)
+		if flash_strength:
+			flash_surface.fill((255, 255, 255, flash_strength))
+			screen.blit(flash_surface, (0, 0))
 
 		header = f"PLAYER {player_id or '-'}    {state['time_left'] // 60:02d}:{state['time_left'] % 60:02d}    DRIVE: W/S    STRAFE: Q/E    TURN: A/D or LEFT/RIGHT"
 		screen.blit(info_font.render(header, True, (232, 222, 181)), (20, 18))

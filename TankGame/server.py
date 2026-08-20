@@ -34,7 +34,7 @@ WALLS = [(210, 100, 300, 24), (760, 90, 24, 230), (1080, 110, 280, 24),
 MACHINE_BOUNCE_CHANCE = 0.25
 ROCKET_CONVERGENCE_DISTANCES = (240.0, 150.0, 75.0)
 ROCKET_LAUNCH_INTERVAL = 0.12
-ROCKET_TURN_SPEED = 5.5
+ROCKET_TURN_SPEED = 14.0
 
 
 def intersects_wall(x, y):
@@ -141,8 +141,8 @@ class TankServer:
 					return
 				if player["weapon"] == "rocket_launcher":
 					player["rocket_queue"] = [(side, longitudinal_offset, convergence_distance)
-						for side in (-1, 1)
-						for longitudinal_offset, convergence_distance in zip((-12, 0, 12), ROCKET_CONVERGENCE_DISTANCES)]
+						for longitudinal_offset, convergence_distance in zip((-12, 0, 12), ROCKET_CONVERGENCE_DISTANCES)
+						for side in (-1, 1)]
 					player["rocket_next_launch"] = now
 					return
 				for shot_index in range(weapon["count"]):
@@ -197,24 +197,27 @@ class TankServer:
 				player["y"] = new_y
 
 	def update_rocket_queues(self):
+		if self.winner:
+			return
 		now = time.monotonic()
 		for player_id, player in self.players.items():
 			queue = player.get("rocket_queue", [])
 			if not queue or now < player.get("rocket_next_launch", 0):
 				continue
-			side, longitudinal_offset, convergence_distance = queue.pop(0)
 			angle = player["angle"]
-			launch_x = player["x"] + TANK_SIZE / 2 + math.cos(angle) * longitudinal_offset
-			launch_y = player["y"] + TANK_SIZE / 2 + math.sin(angle) * longitudinal_offset
-			launch_x += -math.sin(angle) * side * (TANK_SIZE * 0.62)
-			launch_y += math.cos(angle) * side * (TANK_SIZE * 0.62)
-			convergence_x = player["x"] + TANK_SIZE / 2 + math.cos(angle) * convergence_distance
-			convergence_y = player["y"] + TANK_SIZE / 2 + math.sin(angle) * convergence_distance
-			self.bullets.append({"owner": player_id, "x": launch_x, "y": launch_y,
-				"angle": angle + side * math.pi / 2, "speed": WEAPONS["rocket_launcher"]["speed"],
-				"damage": WEAPONS["rocket_launcher"]["damage"], "radius": WEAPONS["rocket_launcher"]["radius"],
-				"weapon": "rocket", "target_x": convergence_x, "target_y": convergence_y,
-				"turning": True})
+			for side, longitudinal_offset, convergence_distance in (queue.pop(0), queue.pop(0)):
+				launch_x = player["x"] + TANK_SIZE / 2 + math.cos(angle) * longitudinal_offset
+				launch_y = player["y"] + TANK_SIZE / 2 + math.sin(angle) * longitudinal_offset
+				launch_x += -math.sin(angle) * side * (TANK_SIZE * 0.62)
+				launch_y += math.cos(angle) * side * (TANK_SIZE * 0.62)
+				convergence_x = player["x"] + TANK_SIZE / 2 + math.cos(angle) * convergence_distance
+				convergence_y = player["y"] + TANK_SIZE / 2 + math.sin(angle) * convergence_distance
+				target_angle = math.atan2(convergence_y - launch_y, convergence_x - launch_x)
+				self.bullets.append({"owner": player_id, "x": launch_x, "y": launch_y,
+					"angle": angle + side * math.pi / 2, "speed": WEAPONS["rocket_launcher"]["speed"],
+					"damage": WEAPONS["rocket_launcher"]["damage"], "radius": WEAPONS["rocket_launcher"]["radius"],
+					"weapon": "rocket", "target_x": convergence_x, "target_y": convergence_y,
+					"target_angle": target_angle, "turning": True})
 			player["rocket_next_launch"] = now + ROCKET_LAUNCH_INTERVAL
 
 	def update_bullets(self, delta):
@@ -227,8 +230,7 @@ class TankServer:
 				message = owner.get("input", {})
 				bullet["angle"] += max(-1, min(1, float(message.get("turn", 0)))) * TURN_SPEED * delta
 			elif bullet["weapon"] == "rocket" and bullet.get("turning"):
-				target_angle = math.atan2(bullet["target_y"] - bullet["y"],
-					bullet["target_x"] - bullet["x"])
+				target_angle = bullet["target_angle"]
 				angle_difference = (target_angle - bullet["angle"] + math.pi) % (2 * math.pi) - math.pi
 				max_turn = ROCKET_TURN_SPEED * delta
 				if abs(angle_difference) <= max_turn:
@@ -242,13 +244,21 @@ class TankServer:
 				if bullet["weapon"] == "drone":
 					self.explode_drone(bullet)
 				continue
-			if bullet["weapon"] != "portal" and any(
-				wall[0] - bullet["radius"] <= bullet["x"] <= wall[0] + wall[2] + bullet["radius"]
-				and wall[1] - bullet["radius"] <= bullet["y"] <= wall[1] + wall[3] + bullet["radius"]
-				for wall in WALLS):
-				if bullet["weapon"] == "drone":
-					self.explode_drone(bullet)
-				continue
+			if bullet["weapon"] != "portal":
+				wall_hit = next((wall for wall in WALLS
+					if wall[0] - bullet["radius"] <= bullet["x"] <= wall[0] + wall[2] + bullet["radius"]
+					and wall[1] - bullet["radius"] <= bullet["y"] <= wall[1] + wall[3] + bullet["radius"]), None)
+				if wall_hit:
+					if bullet["weapon"] == "drone":
+						self.explode_drone(bullet)
+						continue
+					if bullet["weapon"] == "machine" and random.random() < MACHINE_BOUNCE_CHANCE:
+						wall_is_horizontal = wall_hit[2] >= wall_hit[3]
+						bullet["angle"] = -bullet["angle"] if wall_is_horizontal else math.pi - bullet["angle"]
+						bullet["x"] -= math.cos(bullet["angle"]) * bullet["speed"] * delta
+						bullet["y"] -= math.sin(bullet["angle"]) * bullet["speed"] * delta
+						survivors.append(bullet)
+					continue
 			hit = False
 			if bullet["weapon"] != "drone":
 				for missile in self.bullets:
@@ -327,7 +337,7 @@ class TankServer:
 			player = self.players[player_id]
 			player.update({"x": x, "y": y, "angle": 0.0 if index == 0 else math.pi,
 				"health": MAX_HEALTH, "weapon": "cannon", "input": {}, "next_shot": 0,
-				"drone_active": False})
+				"drone_active": False, "rocket_queue": [], "rocket_next_launch": 0})
 
 	def snapshot(self, now):
 		time_left = ROUND_SECONDS if not self.round_started else max(0, ROUND_SECONDS - int(now - self.round_started))
