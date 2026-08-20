@@ -12,7 +12,8 @@ PORT = 5555
 WIDTH, HEIGHT = 1470, 956
 TANK_SIZE = 42
 MAX_HEALTH = 12
-DRONE_MAX_HEALTH = 2
+DRONE_MAX_HEALTH = 0.5
+DRONE_BATTERY_SECONDS = 4.0
 DRONE_SPLASH_RADIUS = 150
 EXPLOSION_DURATION = 0.18
 TANK_SPEED = 185.0
@@ -116,6 +117,8 @@ class TankServer:
 			if message.get("restart") and self.winner and len(self.players) == 2:
 				self.reset_round()
 				return
+			if player.get("health", MAX_HEALTH) <= 0:
+				return
 			player["input"] = message
 			if self.winner:
 				return
@@ -136,6 +139,7 @@ class TankServer:
 						"y": player["y"] + TANK_SIZE / 2, "angle": player["angle"],
 						"speed": weapon["speed"], "damage": weapon["damage"],
 						"health": DRONE_MAX_HEALTH, "max_health": DRONE_MAX_HEALTH,
+						"battery": DRONE_BATTERY_SECONDS, "max_battery": DRONE_BATTERY_SECONDS,
 						"radius": weapon["radius"], "weapon": "drone"})
 					player["drone_active"] = True
 					return
@@ -179,7 +183,7 @@ class TankServer:
 
 	def update_players(self, delta):
 		for player in self.players.values():
-			if player.get("drone_active"):
+			if player.get("health", MAX_HEALTH) <= 0 or player.get("drone_active"):
 				continue
 			message = player.get("input", {})
 			turn = max(-1, min(1, float(message.get("turn", 0))))
@@ -229,6 +233,10 @@ class TankServer:
 				owner = self.players.get(bullet["owner"])
 				if not owner or not owner.get("drone_active"):
 					continue
+				bullet["battery"] -= delta
+				if bullet["battery"] <= 0:
+					self.explode_drone(bullet)
+					continue
 				message = owner.get("input", {})
 				bullet["angle"] += max(-1, min(1, float(message.get("turn", 0)))) * TURN_SPEED * delta
 			elif bullet["weapon"] == "rocket" and bullet.get("turning"):
@@ -245,6 +253,8 @@ class TankServer:
 			if not (0 <= bullet["x"] <= WIDTH and 0 <= bullet["y"] <= HEIGHT):
 				if bullet["weapon"] == "drone":
 					self.explode_drone(bullet)
+				elif bullet["weapon"] == "rocket":
+					self.explode_projectile(bullet, 65)
 				continue
 			if bullet["weapon"] != "portal":
 				wall_hit = next((wall for wall in WALLS
@@ -253,6 +263,9 @@ class TankServer:
 				if wall_hit:
 					if bullet["weapon"] == "drone":
 						self.explode_drone(bullet)
+						continue
+					if bullet["weapon"] == "rocket":
+						self.explode_projectile(bullet, 65)
 						continue
 					if bullet["weapon"] == "machine" and random.random() < MACHINE_BOUNCE_CHANCE:
 						left = wall_hit[0] - bullet["radius"]
@@ -298,6 +311,10 @@ class TankServer:
 						self.explode_drone(bullet)
 						hit = True
 						break
+					if bullet["weapon"] == "rocket":
+						self.explode_projectile(bullet, 65)
+						hit = True
+						break
 					if bullet["weapon"] == "machine" and random.random() < MACHINE_BOUNCE_CHANCE:
 						bullet["angle"] = (bullet["angle"] + math.pi
 							+ random.uniform(-0.45, 0.45)) % (2 * math.pi)
@@ -324,9 +341,7 @@ class TankServer:
 		owner = self.players.get(owner_id)
 		if owner:
 			owner["drone_active"] = False
-		self.explosions.append({"x": drone["x"], "y": drone["y"],
-			"radius": DRONE_SPLASH_RADIUS, "time_left": EXPLOSION_DURATION,
-			"duration": EXPLOSION_DURATION})
+		self.explode_projectile(drone, DRONE_SPLASH_RADIUS)
 		for player_id, player in self.players.items():
 			if player_id == owner_id:
 				continue
@@ -335,6 +350,11 @@ class TankServer:
 				player["health"] -= drone["damage"]
 				if player["health"] <= 0:
 					self.winner = owner_id
+
+	def explode_projectile(self, projectile, radius):
+		self.explosions.append({"x": projectile["x"], "y": projectile["y"],
+			"radius": radius, "time_left": EXPLOSION_DURATION,
+			"duration": EXPLOSION_DURATION})
 
 	def detonate_drone(self, owner_id):
 		drone = next((bullet for bullet in self.bullets

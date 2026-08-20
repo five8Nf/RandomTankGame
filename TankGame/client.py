@@ -95,6 +95,25 @@ def draw_tank(screen, player_id, player, is_local):
 	pygame.draw.rect(screen, (55, 60, 70), bar)
 	pygame.draw.rect(screen, (92, 226, 140),
 					(bar.x, bar.y, bar.width * player["health"] / MAX_HEALTH, bar.height))
+	if player.get("health", MAX_HEALTH) <= 0:
+		elapsed = pygame.time.get_ticks() / 1000
+		for smoke_index in range(4):
+			smoke_angle = elapsed * (0.8 + smoke_index * 0.15) + smoke_index * 1.7
+			smoke_distance = 15 + ((elapsed * 22 + smoke_index * 13) % 34)
+			smoke_center = (round(center[0] + math.cos(smoke_angle) * smoke_distance),
+				round(center[1] - smoke_distance * 0.8 + math.sin(smoke_angle) * 5))
+			smoke_radius = 5 + round((smoke_index + 1) * 1.5)
+			pygame.draw.circle(screen, (72, 78, 70), smoke_center, smoke_radius)
+			pygame.draw.circle(screen, (108, 108, 92), smoke_center, max(2, smoke_radius - 3))
+		for flame_index in range(3):
+			flame_x = center[0] - 10 + flame_index * 10
+			flame_height = 10 + round(4 * math.sin(elapsed * 8 + flame_index))
+			flame_points = [(flame_x - 5, center[1] + 12), (flame_x + 5, center[1] + 12),
+				(flame_x, center[1] + 12 + flame_height)]
+			pygame.draw.polygon(screen, (239, 105, 47), flame_points)
+			pygame.draw.polygon(screen, (255, 214, 89),
+				[(flame_x - 2, center[1] + 12), (flame_x + 2, center[1] + 12),
+				 (flame_x, center[1] + 9 + flame_height // 2)])
 
 
 def draw_explosion(screen, explosion):
@@ -234,6 +253,11 @@ def main():
 				pygame.draw.rect(world_surface, (55, 60, 70), drone_bar)
 				pygame.draw.rect(world_surface, (239, 190, 72),
 					(drone_bar.x, drone_bar.y, drone_bar.width * bullet["health"] / bullet["max_health"], drone_bar.height))
+				drone_battery_bar = pygame.Rect(int(bullet["x"]) - 12, int(bullet["y"]) - 22, 24, 2)
+				pygame.draw.rect(world_surface, (55, 60, 70), drone_battery_bar)
+				pygame.draw.rect(world_surface, (110, 220, 255),
+					(drone_battery_bar.x, drone_battery_bar.y,
+					 drone_battery_bar.width * bullet["battery"] / bullet["max_battery"], drone_battery_bar.height))
 			elif bullet.get("weapon") == "rocket":
 				center = (int(bullet["x"]), int(bullet["y"]))
 				direction = (math.cos(bullet["angle"]), math.sin(bullet["angle"]))
